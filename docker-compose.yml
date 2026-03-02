@@ -1,0 +1,140 @@
+services:
+    # 1. The Graph Memory
+    neo4j:
+        image: neo4j:5.15.0
+        container_name: hero-graph-db
+        ports:
+            - "7474:7474" # Browser UI
+            - "7687:7687" # Bolt protocol
+        environment:
+            - NEO4J_AUTH=${NEO4J_USER}/${NEO4J_PASSWORD}
+            - NEO4J_PLUGINS=["apoc"]
+            - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+        volumes:
+            - neo4j_data:/data
+        networks:
+            - hero-net
+        healthcheck:
+            test: ["CMD", "cypher-shell", "-u", "${NEO4J_USER}", "-p", "${NEO4J_PASSWORD}", "RETURN 1"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+        
+    # 2. Deterministic Math Engine
+    quant-engine:
+        build: ./quant_engine
+        container_name: hero-quant-engine
+        ports:
+            - "8000:8000"
+        volumes:
+            - ./quant_engine:/app
+        networks:
+            - hero-net
+    
+    # 3. LLM: Qwen2.5 (The new standard)
+    ollama:
+        image: ollama/ollama:latest
+        container_name: hero-llm-extractor
+        ports:
+            - "11434:11434"
+        volumes:
+            - ollama_data:/root/.ollama
+            - ./Modelfile:/Modelfile
+        networks:
+            - hero-net
+        deploy:
+            resources:
+                reservations:
+                    devices:
+                        - driver: nvidia
+                          count: all
+                          capabilities: [gpu]
+        entrypoint: ["/bin/sh", "-c"]
+        command: |
+            "
+            ollama serve &
+            sleep 5
+            ollama create finma -f /Modelfile
+            wait
+            "
+        healthcheck:
+          test: ["CMD", "ollama", "list"]
+          interval: 10s
+          timeout: 5s
+          retries: 10
+    
+    
+    # 4. The Orchestrator (Ingest and Query)
+    orchestrator:
+        build: ./orchestrator
+        container_name: hero-orchestrator
+        depends_on:
+            neo4j:
+                condition: service_healthy
+            quant-engine:
+                condition: service_started
+            ollama:
+                condition: service_healthy
+        volumes:
+            - ./orchestrator:/app/
+            - ./data:/data
+        environment:
+            - NEO4J_URI=${NEO4J_URI}
+            - NEO4J_USER=${NEO4J_USER}
+            - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+            - QUANT_ENGINE_URL=${QUANT_ENGINE_URL}
+            - DATA_DIR=${DATA_DIR}
+            - OLLAMA_URL=http://ollama:11434
+            - FINMA_MODEL=finma
+        deploy:
+            resources:
+                reservations:
+                    devices:
+                        - driver: nvidia
+                          count: all
+                          capabilities: [gpu]
+        command: tail -f /dev/null
+        networks:
+            - hero-net
+
+    # 5. Financial Chatbot API
+    chatbot:
+        build: ./orchestrator
+        container_name: hero-chatbot
+        ports:
+            - "8501:8501"
+        depends_on:
+            neo4j:
+                condition: service_healthy
+            quant-engine:
+                condition: service_started
+            ollama:
+                condition: service_healthy
+        volumes:
+            - ./orchestrator:/app/
+            - ./data:/data
+        environment:
+            - NEO4J_URI=${NEO4J_URI}
+            - NEO4J_USER=${NEO4J_USER}
+            - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+            - QUANT_ENGINE_URL=${QUANT_ENGINE_URL}
+            - DATA_DIR=${DATA_DIR}
+            - OLLAMA_URL=http://ollama:11434
+            - FINMA_MODEL=finma
+        deploy:
+            resources:
+                reservations:
+                    devices:
+                        - driver: nvidia
+                          count: all
+                          capabilities: [gpu]
+        command: uvicorn chat:app --host 0.0.0.0 --port 8501
+        networks:
+            - hero-net
+    
+networks:
+    hero-net:
+
+volumes:
+    neo4j_data:
+    ollama_data:

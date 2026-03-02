@@ -1,0 +1,11 @@
+neo4j
+pandas
+requests
+lxml
+html5lib
+dateparser
+uvicorn
+fastapi
+sentence_transformers
+pydantic
+beautifulsoup4
