@@ -1,4 +1,4 @@
-# RAG Financial Chatbot — Implementation Plan
+# Financial Chatbot — Implementation Plan
 
 ## Problem
 
